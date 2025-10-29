@@ -36,8 +36,9 @@ processing:
 
 # OCR settings
 ocr:
-  engine: "tesseract"  # or "easyocr"
-  confidence_threshold: 60
+  engine: "easyocr"  # "easyocr" (better accuracy) or "tesseract" (faster)
+  confidence_threshold: 50
+  use_template_matching: true  # Fallback to template matching if OCR fails
   custom_config: r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789'
 
 # Game values

@@ -88,7 +88,7 @@ def test_ocr_helper():
     cv2.rectangle(img, (440, 80), (580, 160), (100, 100, 100), 2)
     
     try:
-        ocr = OCRHelper(engine="tesseract", confidence_threshold=30)
+        ocr = OCRHelper(engine="easyocr", confidence_threshold=50)
         numbers = ocr.extract_numbers(img)
         
         if numbers:

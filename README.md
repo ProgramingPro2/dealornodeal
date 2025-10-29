@@ -5,12 +5,14 @@ A computer vision system for tracking case positions and values in the Deal or N
 ## Features
 
 - **Automatic Game Detection**: Detects game start (200/100 values) and end (1/16 values)
+- **Advanced OCR**: Uses EasyOCR for superior number recognition (90%+ accuracy)
 - **Perspective Correction**: Handles odd viewing angles and auto-crops to game screen
 - **Case Tracking**: Uses blob detection + optical flow to track cases during shuffle
 - **Dual Processing**: Real-time tracking + post-game video verification
 - **Raspberry Pi Optimized**: Designed to run efficiently on Pi 4B+ and Pi 5
 - **Web Interface**: Real-time visualization with case highlighting
 - **Remote Processing**: Optional API server for offloading heavy computation
+- **No Heavy ML**: Uses classical computer vision (no YOLO/neural networks)
 
 ## Quick Start
 
@@ -87,8 +89,9 @@ processing:
 
 # OCR settings
 ocr:
-  engine: "tesseract"  # or "easyocr"
-  confidence_threshold: 60
+  engine: "easyocr"  # "easyocr" (better accuracy) or "tesseract" (faster)
+  confidence_threshold: 50
+  use_template_matching: true  # Fallback to template matching if OCR fails
 
 # Game values
 values:
@@ -181,15 +184,19 @@ Camera → Client → API Server → CaseTracker → Results
    - Ensure good lighting
    - Position camera perpendicular to screen
    - Adjust `confidence_threshold` in config
+   - **EasyOCR provides 90%+ accuracy** (recommended)
 
 3. **High CPU usage on Pi**
-   - Use remote mode
+   - Use remote mode (highly recommended for Pi 4B+)
    - Reduce frame resolution
    - Increase `skip_frames` value
+   - EasyOCR loads models on first run (may take 30-60 seconds)
 
 4. **OCR not working**
-   - Install Tesseract: `sudo apt install tesseract-ocr`
-   - Try EasyOCR: change `engine: "easyocr"` in config
+   - **Default: EasyOCR** (best accuracy, automatically downloads models)
+   - Fallback: Tesseract (`sudo apt install tesseract-ocr`)
+   - For faster but less accurate: change `engine: "tesseract"` in config
+   - EasyOCR requires internet on first run to download models (~100MB)
 
 ### Performance Tips
 

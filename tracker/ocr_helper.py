@@ -76,32 +76,77 @@ class OCRHelper:
         Returns:
             List of (text, confidence, bbox) tuples
         """
-        # Get detailed data from tesseract
-        data = pytesseract.image_to_data(
-            image, config=self.tesseract_config, output_type=pytesseract.Output.DICT
-        )
+        import re
         
-        results = []
-        n_boxes = len(data['text'])
+        # Try multiple PSM modes for better detection
+        psm_modes = [6, 7, 8, 11, 13]  # Different page segmentation modes
+        all_results = []
         
-        for i in range(n_boxes):
-            text = data['text'][i].strip()
-            conf = int(data['conf'][i])
+        for psm in psm_modes:
+            config = f'--oem 3 --psm {psm} -c tessedit_char_whitelist=0123456789'
             
-            if conf >= 0 and text:  # Accept any confidence >= 0
-                # Split concatenated numbers (e.g., "200100" -> ["200", "100"])
-                import re
-                numbers = re.findall(r'\d+', text)
+            try:
+                # Get detailed data from tesseract
+                data = pytesseract.image_to_data(
+                    image, config=config, output_type=pytesseract.Output.DICT
+                )
                 
-                for num in numbers:
-                    if num.isdigit():
-                        x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
-                        # Split bbox for multiple numbers (rough approximation)
-                        if len(numbers) > 1:
-                            w = w // len(numbers)
-                        results.append((num, conf, (x, y, w, h)))
+                n_boxes = len(data['text'])
+                
+                for i in range(n_boxes):
+                    text = data['text'][i].strip()
+                    conf = int(data['conf'][i]) if data['conf'][i] != -1 else 0
+                    
+                    if text and len(text) > 0:
+                        # Extract all numbers from the text
+                        numbers = re.findall(r'\d+', text)
+                        
+                        for num_str in numbers:
+                            if num_str.isdigit() and len(num_str) <= 3:  # Valid case values are 1-3 digits
+                                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+                                
+                                # Try to split concatenated numbers by known values
+                                if len(num_str) > 3:
+                                    # Split by known patterns (e.g., "200100" -> "200", "100")
+                                    potential_splits = self._split_concatenated_numbers(num_str)
+                                    for split_num in potential_splits:
+                                        all_results.append((split_num, conf, (x, y, w, h)))
+                                else:
+                                    all_results.append((num_str, conf, (x, y, w, h)))
+            except Exception as e:
+                continue
         
-        return results
+        # Deduplicate results (keep highest confidence for each unique number+position)
+        unique_results = {}
+        for text, conf, bbox in all_results:
+            key = (text, bbox[0] // 50, bbox[1] // 50)  # Group by text and approximate position
+            if key not in unique_results or conf > unique_results[key][1]:
+                unique_results[key] = (text, conf, bbox)
+        
+        return list(unique_results.values())
+    
+    def _split_concatenated_numbers(self, num_str: str) -> List[str]:
+        """Split concatenated numbers based on known expected values."""
+        expected = [str(v) for v in [2, 4, 6, 8, 10, 12, 14, 16, 20, 30, 40, 80, 100, 150, 200, 400]]
+        results = []
+        
+        # Try to find expected values in the string
+        i = 0
+        while i < len(num_str):
+            found = False
+            # Try matching from longest to shortest
+            for length in [3, 2, 1]:
+                if i + length <= len(num_str):
+                    candidate = num_str[i:i+length]
+                    if candidate in expected:
+                        results.append(candidate)
+                        i += length
+                        found = True
+                        break
+            if not found:
+                i += 1
+        
+        return results if results else [num_str]
     
     def extract_numbers_easyocr(self, image: np.ndarray) -> List[Tuple[str, float, Tuple[int, int, int, int]]]:
         """
@@ -139,14 +184,85 @@ class OCRHelper:
         Returns:
             List of (text, confidence, bbox) tuples
         """
-        preprocessed = self.preprocess_for_ocr(image)
-        
+        # First try direct extraction
         if self.engine == "tesseract":
-            return self.extract_numbers_tesseract(preprocessed)
+            results = self.extract_numbers_tesseract(image)
         elif self.engine == "easyocr":
-            return self.extract_numbers_easyocr(preprocessed)
+            results = self.extract_numbers_easyocr(image)
         else:
             raise ValueError(f"Unsupported OCR engine: {self.engine}")
+        
+        # If no results, try with preprocessing
+        if not results:
+            preprocessed = self.preprocess_for_ocr(image)
+            if self.engine == "tesseract":
+                results = self.extract_numbers_tesseract(preprocessed)
+            elif self.engine == "easyocr":
+                results = self.extract_numbers_easyocr(preprocessed)
+        
+        # If still no results, try region-based detection
+        if not results:
+            results = self._extract_numbers_region_based(image)
+        
+        return results
+    
+    def _extract_numbers_region_based(self, image: np.ndarray) -> List[Tuple[str, float, Tuple[int, int, int, int]]]:
+        """
+        Extract numbers by detecting text regions first, then OCR each region.
+        
+        Args:
+            image: Input image
+            
+        Returns:
+            List of (text, confidence, bbox) tuples
+        """
+        import re
+        
+        # Convert to grayscale
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image.copy()
+        
+        # Find contours (potential text regions)
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        results = []
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Filter by size (skip very small regions)
+            if w < 20 or h < 20 or w > image.shape[1] * 0.8:
+                continue
+            
+            # Add padding
+            padding = 10
+            x1 = max(0, x - padding)
+            y1 = max(0, y - padding)
+            x2 = min(image.shape[1], x + w + padding)
+            y2 = min(image.shape[0], y + h + padding)
+            
+            # Extract region
+            region = image[y1:y2, x1:x2]
+            
+            if region.size == 0:
+                continue
+            
+            # OCR this region
+            try:
+                config = '--oem 3 --psm 7 -c tessedit_char_whitelist=0123456789'
+                text = pytesseract.image_to_string(region, config=config).strip()
+                
+                # Extract numbers
+                numbers = re.findall(r'\d+', text)
+                for num_str in numbers:
+                    if num_str.isdigit() and 1 <= len(num_str) <= 3:
+                        results.append((num_str, 75, (x, y, w, h)))
+            except:
+                pass
+        
+        return results
     
     def detect_game_start(self, image: np.ndarray, start_triggers: List[int] = [200, 100]) -> bool:
         """

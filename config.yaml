@@ -1,0 +1,54 @@
+# Deal or No Deal Tracker Configuration
+
+# Server settings
+server:
+  host: "localhost"
+  port: 8000
+  url: "http://localhost:8000"
+
+# Camera settings
+camera:
+  width: 640
+  height: 480
+  fps: 30
+  device_id: 0
+
+# Processing settings
+processing:
+  # Frame processing
+  resize_width: 640
+  resize_height: 480
+  skip_frames: 2  # Process every Nth frame during shuffle
+  
+  # Blob detection
+  blob_min_area: 100
+  blob_max_area: 5000
+  blob_threshold: 50
+  
+  # Optical flow
+  flow_win_size: [15, 15]
+  flow_max_level: 2
+  flow_criteria: [10, 0.03]
+  
+  # Tracking
+  max_disappeared: 10  # Frames before considering case lost
+  max_distance: 100    # Max pixel distance for ID matching
+
+# OCR settings
+ocr:
+  engine: "tesseract"  # or "easyocr"
+  confidence_threshold: 60
+  custom_config: r'--oem 3 --psm 6 -c tessedit_char_whitelist=0123456789'
+
+# Game values
+values:
+  expected_values: [2, 4, 6, 8, 10, 12, 14, 16, 20, 30, 40, 80, 100, 150, 200, 400]
+  start_triggers: [200, 100]
+  end_triggers: [1, 16]
+
+# Visualization
+visualization:
+  show_tracking: true
+  show_confidence: true
+  highlight_best: true
+  overlay_alpha: 0.7
